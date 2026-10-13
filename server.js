@@ -48,7 +48,33 @@ async function grade(body){
  }else if(!Array.isArray(parsed.results)||p.questions.some(q=>!parsed.results.some(a=>a.number===q.number&&['correct','acceptable','almost','incorrect'].includes(a.verdict)&&typeof a.feedback==='string')))throw new Error('判定結果が不足しています。');
  return parsed;
 }
+
+const GITHUB_ORIGIN='https://k-oota-pixel.github.io';
+function originAllowed(req){
+ const origin=req.headers.origin;
+ if(!origin)return true;
+ try{
+  const u=new URL(origin);
+  return origin===GITHUB_ORIGIN||u.host===req.headers.host;
+ }catch{return false;}
+}
+function applyCors(req,res){
+ if(req.headers.origin===GITHUB_ORIGIN){
+  res.setHeader('Access-Control-Allow-Origin',GITHUB_ORIGIN);
+  res.setHeader('Vary','Origin');
+  res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers','Content-Type');
+  res.setHeader('Access-Control-Max-Age','86400');
+ }
+}
+
 export const server=http.createServer(async(req,res)=>{
+ applyCors(req,res);
+ if(req.method==='OPTIONS'){
+  if(!originAllowed(req))return send(res,403,{error:'このサイトからは利用できません。'});
+  res.writeHead(204);return res.end();
+ }
+ if(!originAllowed(req))return send(res,403,{error:'このサイトからは利用できません。'});
  const path=new URL(req.url,'http://localhost').pathname;
  if(req.method==='GET'&&(path==='/'||path==='/index.html')){res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','X-Content-Type-Options':'nosniff'});return res.end(html);}
  if(req.method==='GET'&&path==='/health')return send(res,200,{ok:true});
