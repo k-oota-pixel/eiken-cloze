@@ -1,0 +1,40 @@
+name: Apply coin rewards
+
+on:
+  push:
+    paths:
+      - '.github/workflows/coin-reward-patch.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch cloze coin rewards
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          tag='<script type="module" src="https://k-oota-pixel.github.io/english-playroom/coin-reward.js"></script>'
+          for name in ('index.html','public/index.html'):
+              p=Path(name)
+              s=p.read_text(encoding='utf-8')
+              if tag not in s:
+                  s=s.replace('</body>',tag+'\n</body>')
+              needle='''window.readingLabCloud={\n  async recordAttempt(info){'''
+              repl=needle+'''\n    window.EnglishPlayroomCoins?.awardCloze?.(info?.passageId);'''
+              if 'awardCloze?.(info?.passageId)' not in s:
+                  if needle not in s: raise SystemExit(f'reward hook target not found in {name}')
+                  s=s.replace(needle,repl,1)
+              p.write_text(s,encoding='utf-8')
+          PY
+      - name: Commit patch
+        run: |
+          if git diff --quiet -- index.html public/index.html; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html public/index.html
+          git commit -m "Connect cloze practice to shared coin rewards"
+          git push
