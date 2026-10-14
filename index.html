@@ -149,6 +149,7 @@ async function syncOnLogin(user){
 }
 window.readingLabCloud={
   async recordAttempt(info){
+    window.EnglishPlayroomCoins?.awardCloze?.(info?.passageId);
     const s=readLocal();
     if(info?.passageId&&!s.attemptedIds.includes(info.passageId))s.attemptedIds.push(info.passageId);
     s.submissions+=1;
@@ -185,4 +186,5 @@ onAuthStateChanged(auth,async user=>{
   finally{loginBtn.disabled=false;}
 });
 </script>
+<script type="module" src="https://k-oota-pixel.github.io/english-playroom/coin-reward.js"></script>
 </body></html>
