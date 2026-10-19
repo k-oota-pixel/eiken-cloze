@@ -114,6 +114,18 @@ jobs:
                       raise SystemExit(f'recordAttempt write target not found in {name}')
                   s=s.replace(target,target+'\n    '+hook,1)
 
+              if 'window.readingLabRefreshProgress=' not in s:
+                  target='window.readingLabSaveCurrentAttempt=saveCurrentAttemptFromPage;'
+                  if target not in s:
+                      raise SystemExit(f'refresh export target not found in {name}')
+                  s=s.replace(target,target+'\nwindow.readingLabRefreshProgress=()=>{refreshPassageOptions();renderPreviousAttempt();};',1)
+
+              if 'writeLocal(merged);\n  window.readingLabRefreshProgress?.();' not in s:
+                  target='writeLocal(merged);'
+                  if target not in s:
+                      raise SystemExit(f'cloud sync refresh target not found in {name}')
+                  s=s.replace(target,target+'\n  window.readingLabRefreshProgress?.();',1)
+
               p.write_text(s,encoding='utf-8')
           PY
       - name: Commit patch
@@ -122,5 +134,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add index.html public/index.html
-          git commit -m "Show completed cloze passages and latest answers"
+          git commit -m "Refresh cloze completion checks after sync"
           git push
