@@ -4,7 +4,7 @@ import {readFileSync} from 'node:fs';
 const data=JSON.parse(readFileSync(new URL('./data.json',import.meta.url),'utf8')).passages;
 const html=readFileSync(new URL('./public/index.html',import.meta.url));
 const key=process.env.GEMINI_API_KEY;
-const model=process.env.EIKEN_GEMINI_MODEL||'gemini-2.5-flash';
+const model=process.env.EIKEN_GEMINI_MODEL||'gemini-3.8-flash';
 
 const clozePrompt=`あなたは日本の高校生向けの英語読解・ライティングの先生です。
 長文の空所に入る生徒の英語を、文脈・意味・文法・語法・自然さの観点から評価してください。
@@ -64,7 +64,7 @@ async function callGemini(payload){
     generationConfig:{
       temperature:0.1,
       maxOutputTokens:1536,
-      thinkingConfig:{thinkingLevel:'minimal'},
+      thinkingConfig:{thinkingLevel:'low'},
       responseMimeType:'application/json',
       responseSchema
     }
@@ -84,8 +84,10 @@ async function callGemini(payload){
       try{detail=await response.json();}catch{}
       const reason=(detail.error?.details||[]).find(item=>typeof item.reason==='string')?.reason;
       const code=String(reason||detail.error?.status||'UNKNOWN').replace(/[^A-Z0-9_]/g,'').slice(0,80);
+      console.error(`Gemini ${model} HTTP ${response.status}: ${code}`);
       if([500,502,503,504].includes(response.status)&&attempt===0){await sleep(350);continue;}
       if(response.status===429)throw Object.assign(new Error('Geminiの利用が一時的に集中しています。少し待って、もう一度お試しください。'),{status:503});
+      if(response.status===404)throw Object.assign(new Error('AIモデルに接続できませんでした。先生がモデル設定を確認してください。'),{status:502});
       if(response.status>=500)throw Object.assign(new Error('Gemini側で一時的なエラーが発生しました。もう一度お試しください。'),{status:503});
       throw Object.assign(new Error(`Geminiエラー ${response.status} / ${code}`),{status:502});
     }catch(e){
