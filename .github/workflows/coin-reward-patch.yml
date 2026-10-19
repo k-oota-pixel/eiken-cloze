@@ -34,7 +34,9 @@ jobs:
                   s=s.replace(needle,repl,1)
 
               if '.previous-attempt{' not in s:
-                  css='.previous-attempt{margin:-8px 0 22px;background:white;border:1px solid #dce5f1;border-radius:12px;padding:0 16px;box-shadow:0 3px 12px #20345106}.previous-attempt summary{cursor:pointer;padding:12px 2px;font-weight:750;color:var(--accent)}.previous-attempt[open] summary{border-bottom:1px solid #e7edf5}.previous-attempt-body{padding:12px 2px 4px}.previous-meta{font-size:12px;color:#6b7a90;margin-bottom:8px}.previous-row{padding:10px 0;border-bottom:1px solid #edf1f6}.previous-row:last-child{border-bottom:0}.previous-answer{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}.previous-answer strong{font-size:13px;color:#52647d}.previous-answer span{font-weight:750;color:var(--ink)}.previous-feedback{font-size:13px;color:#52647d;margin-top:5px;white-space:pre-wrap}.previous-verdict{font-weight:750;color:var(--accent);margin-right:7px}'
+                  css='.previous-attempt{margin:-8px 0 22px;background:white;border:1px solid #dce5f1;border-radius:12px;padding:0 16px;box-shadow:0 3px 12px #20345106}.previous-attempt summary{cursor:pointer;padding:12px 2px;font-weight:750;color:var(--accent)}.previous-attempt[open] summary{border-bottom:1px solid #e7edf5}.previous-attempt-body{padding:12px 2px 4px}.previous-meta{font-size:12px;color:#6b7a90;margin-bottom:8px}.previous-row{padding:10px 0;border-bottom:1px solid #edf1f6}.previous-row:last-child{border-bottom:0}.previous-answer{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}.previous-answer strong{font-size:13px;color:#52647d}.previous-answer span{font-weight:750;color:var(--ink)}.previous-feedback{font-size:13px;color:#52647d;margin-top:5px;white-space:pre-wrap}'
+                  if '.navigation{' not in s:
+                      raise SystemExit(f'CSS target not found in {name}')
                   s=s.replace('.navigation{',css+'.navigation{',1)
 
               if 'id="previousAttempt"' not in s:
@@ -50,7 +52,6 @@ jobs:
                       "const CLOZE_HISTORY_KEY='readinglab-eiken-cloze-last-answers-v1';",
                       "function readProgressSnapshot(){try{return JSON.parse(localStorage.getItem(CLOZE_PROGRESS_KEY)||'{}')||{};}catch{return {};}}",
                       "function readAnswerHistory(){try{return JSON.parse(localStorage.getItem(CLOZE_HISTORY_KEY)||'{}')||{};}catch{return {};}}",
-                      "function saveLatestAttempt(passageId,attempt){const h=readAnswerHistory();h[passageId]=attempt;localStorage.setItem(CLOZE_HISTORY_KEY,JSON.stringify(h));}",
                       'function refreshPassageOptions(){',
                       '  const progress=readProgressSnapshot();',
                       '  const attempted=new Set(Array.isArray(progress.attemptedIds)?progress.attemptedIds:[]);',
@@ -65,18 +66,29 @@ jobs:
                       "  if(!attempt||!Array.isArray(attempt.answers)||!attempt.answers.length){box.classList.add('hidden');box.open=false;body.innerHTML='';return;}",
                       "  box.classList.remove('hidden');",
                       "  $('previousAttemptSummary').textContent='前回のあなたの解答（1件）';",
-                      '  const resultMap=new Map((Array.isArray(attempt.results)?attempt.results:[]).map(r=>[Number(r.number),r]));',
-                      "  const verdictLabel={correct:'正解',acceptable:'別解としてOK',almost:'あと少し',incorrect:'要修正'};",
                       '  const rows=attempt.answers.map(a=>{',
-                      '    const r=resultMap.get(Number(a.number));',
-                      "    let feedback='';",
-                      "    if(r){const label=verdictLabel[r.verdict]||'';const suggestion=r.suggestion?`\\n表現例：${esc(r.suggestion)}`:'';feedback=`<div class=\"previous-feedback\"><span class=\"previous-verdict\">${esc(label)}</span>${esc(r.feedback||'')}${suggestion}</div>`;}",
+                      "    const feedback=a.feedback?`<div class=\"previous-feedback\">${esc(a.feedback)}</div>`:'';",
                       "    return `<div class=\"previous-row\"><div class=\"previous-answer\"><strong>空所 (${esc(a.number)})</strong><span>${esc(a.answer||'')}</span></div>${feedback}</div>`;",
                       "  }).join('');",
                       "  let saved='';if(Number(attempt.savedAt)){try{saved=new Date(Number(attempt.savedAt)).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});}catch{}}",
                       "  const modeText=attempt.mode==='choice'?'4択':'自分で入力';",
                       "  body.innerHTML=`<div class=\"previous-meta\">${esc(modeText)}${saved?' · '+esc(saved):''}</div>${rows}`;",
                       '}',
+                      'function saveCurrentAttemptFromPage(info){',
+                      '  if(!info?.passageId)return;',
+                      '  const answers=[];',
+                      "  if(info.mode==='choice'){",
+                      "    document.querySelectorAll('#tasks .choice.selected').forEach(el=>{const n=Number(el.dataset.q);const text=el.textContent.replace(/^\\s*\\d+\\s*/, '').trim();const fb=document.getElementById('feedback'+n)?.innerText?.trim()||'';answers.push({number:n,answer:text,feedback:fb});});",
+                      '  }else{',
+                      "    document.querySelectorAll('#tasks input[data-number]').forEach(el=>{const n=Number(el.dataset.number);const fb=document.getElementById('feedback'+n)?.innerText?.trim()||'';answers.push({number:n,answer:el.value.trim(),feedback:fb});});",
+                      '  }',
+                      '  if(!answers.length)return;',
+                      '  const h=readAnswerHistory();',
+                      '  h[info.passageId]={savedAt:Date.now(),mode:info.mode,answers};',
+                      '  localStorage.setItem(CLOZE_HISTORY_KEY,JSON.stringify(h));',
+                      '  refreshPassageOptions();renderPreviousAttempt();',
+                      '}',
+                      'window.readingLabSaveCurrentAttempt=saveCurrentAttemptFromPage;',
                       ''
                   ])
                   if 'function render(){' not in s:
@@ -84,7 +96,10 @@ jobs:
                   s=s.replace('function render(){',helper+'function render(){',1)
 
               if "$('passageSelect').value=index;renderPreviousAttempt();" not in s:
-                  s=s.replace("$('passageSelect').value=index;","$('passageSelect').value=index;renderPreviousAttempt();",1)
+                  target="$('passageSelect').value=index;"
+                  if target not in s:
+                      raise SystemExit(f'render history target not found in {name}')
+                  s=s.replace(target,target+'renderPreviousAttempt();',1)
 
               if "refreshPassageOptions();$('passageSelect').onchange" not in s:
                   pattern=r"\$\('passageSelect'\)\.innerHTML=DATA\.map\(\(p,i\)=>.*?\.join\(''\);\$\('passageSelect'\)\.onchange"
@@ -92,19 +107,12 @@ jobs:
                   if n!=1:
                       raise SystemExit(f'select target not found in {name}')
 
-              if "saveLatestAttempt(p.id,{savedAt:Date.now(),mode:'choice'" not in s:
-                  target="mode:'choice'});return;"
-                  inject="mode:'choice'});saveLatestAttempt(p.id,{savedAt:Date.now(),mode:'choice',answers:p.questions.map(q=>{const c=q.choices.find(c=>c.number===answers[q.number]);return {number:q.number,answer:c?.text||''};}),results:p.questions.map(q=>({number:q.number,verdict:answers[q.number]===q.answer_number?'correct':'incorrect',feedback:`解答：${q.answer_number}. ${q.answer_text}`,suggestion:q.answer_text}))});refreshPassageOptions();renderPreviousAttempt();return;"
+              hook='window.readingLabSaveCurrentAttempt?.(info);'
+              if hook not in s:
+                  target='writeLocal(s);'
                   if target not in s:
-                      raise SystemExit(f'choice save target not found in {name}')
-                  s=s.replace(target,inject,1)
-
-              if "saveLatestAttempt(p.id,{savedAt:Date.now(),mode:'free'" not in s:
-                  target="mode:'free'});}}catch(e){"
-                  inject="mode:'free'});saveLatestAttempt(p.id,{savedAt:Date.now(),mode:'free',answers:a.map(x=>({number:x.number,answer:x.answer})),results:result.results.map(r=>({number:r.number,verdict:r.verdict,feedback:r.feedback||'',suggestion:r.suggestion||''}))});refreshPassageOptions();renderPreviousAttempt();}}catch(e){"
-                  if target not in s:
-                      raise SystemExit(f'free save target not found in {name}')
-                  s=s.replace(target,inject,1)
+                      raise SystemExit(f'recordAttempt write target not found in {name}')
+                  s=s.replace(target,target+'\n    '+hook,1)
 
               p.write_text(s,encoding='utf-8')
           PY
