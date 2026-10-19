@@ -1,4 +1,4 @@
-name: Apply coin rewards
+name: Apply cloze learning-history patches
 
 on:
   push:
@@ -13,14 +13,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Patch cloze coin rewards
+      - name: Patch cloze progress and previous answers
         run: |
           python - <<'PY'
           from pathlib import Path
+          import re
+
           tag='<script type="module" src="https://k-oota-pixel.github.io/english-playroom/coin-reward.js"></script>'
           for name in ('index.html','public/index.html'):
               p=Path(name)
               s=p.read_text(encoding='utf-8')
+
+              # Keep shared coin rewards connected.
               if tag not in s:
                   s=s.replace('</body>',tag+'\n</body>')
               needle='''window.readingLabCloud={\n  async recordAttempt(info){'''
@@ -28,6 +32,150 @@ jobs:
               if 'awardCloze?.(info?.passageId)' not in s:
                   if needle not in s: raise SystemExit(f'reward hook target not found in {name}')
                   s=s.replace(needle,repl,1)
+
+              # Compact expandable previous-answer panel.
+              if '.previous-attempt{' not in s:
+                  css='''.previous-attempt{margin:-8px 0 22px;background:white;border:1px solid #dce5f1;border-radius:12px;padding:0 16px;box-shadow:0 3px 12px #20345106}.previous-attempt summary{cursor:pointer;padding:12px 2px;font-weight:750;color:var(--accent);list-style-position:outside}.previous-attempt[open] summary{border-bottom:1px solid #e7edf5}.previous-attempt-body{padding:12px 2px 4px}.previous-meta{font-size:12px;color:#6b7a90;margin-bottom:8px}.previous-row{padding:10px 0;border-bottom:1px solid #edf1f6}.previous-row:last-child{border-bottom:0}.previous-answer{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}.previous-answer strong{font-size:13px;color:#52647d}.previous-answer span{font-weight:750;color:var(--ink)}.previous-feedback{font-size:13px;color:#52647d;margin-top:5px;white-space:pre-wrap}.previous-verdict{font-weight:750;color:var(--accent);margin-right:7px}'''
+                  if '.navigation{' not in s: raise SystemExit(f'CSS target not found in {name}')
+                  s=s.replace('.navigation{',css+'.navigation{',1)
+
+              if 'id="previousAttempt"' not in s:
+                  old='<div class="status" id="connection">AI判定対応</div></div><div class="grid">'
+                  new='<div class="status" id="connection">AI判定対応</div></div><details id="previousAttempt" class="previous-attempt hidden"><summary id="previousAttemptSummary">前回のあなたの解答（1件）</summary><div id="previousAttemptBody" class="previous-attempt-body"></div></details><div class="grid">'
+                  if old not in s: raise SystemExit(f'previous-answer UI target not found in {name}')
+                  s=s.replace(old,new,1)
+
+              # Read existing local/cloud progress without adding extra Firestore reads.
+              if 'function refreshPassageOptions()' not in s:
+                  helper='''const CLOZE_PROGRESS_KEY='readinglab-eiken-cloze-progress-v1';
+function readProgressSnapshot(){
+  try{
+    const d=JSON.parse(localStorage.getItem(CLOZE_PROGRESS_KEY)||'{}');
+    return d&&typeof d==='object'?d:{};
+  }catch{return {};}
+}
+function refreshPassageOptions(){
+  const attempted=new Set(Array.isArray(readProgressSnapshot().attemptedIds)?readProgressSnapshot().attemptedIds:[]);
+  const current=String(index);
+  $('passageSelect').innerHTML=DATA.map((p,i)=>`<option value="${i}">${attempted.has(p.id)?'✓ ':''}${String(i+1).padStart(2,'0')} ${esc(p.title)}</option>`).join('');
+  $('passageSelect').value=current;
+}
+function renderPreviousAttempt(){
+  const box=$('previousAttempt'),body=$('previousAttemptBody');
+  if(!box||!body)return;
+  const progress=readProgressSnapshot();
+  const attempt=progress.lastAnswers?.[DATA[index].id];
+  if(!attempt||!Array.isArray(attempt.answers)||!attempt.answers.length){
+    box.classList.add('hidden');box.open=false;body.innerHTML='';return;
+  }
+  box.classList.remove('hidden');
+  $('previousAttemptSummary').textContent='前回のあなたの解答（1件）';
+  const resultMap=new Map((Array.isArray(attempt.results)?attempt.results:[]).map(r=>[Number(r.number),r]));
+  const verdictLabel={correct:'正解',acceptable:'別解としてOK',almost:'あと少し',incorrect:'要修正'};
+  const rows=attempt.answers.map(a=>{
+    const r=resultMap.get(Number(a.number));
+    let feedback='';
+    if(r){
+      const label=verdictLabel[r.verdict]||'';
+      const suggestion=r.suggestion?`\n表現例：${esc(r.suggestion)}`:'';
+      feedback=`<div class="previous-feedback"><span class="previous-verdict">${esc(label)}</span>${esc(r.feedback||'')}${suggestion}</div>`;
+    }
+    return `<div class="previous-row"><div class="previous-answer"><strong>空所 (${esc(a.number)})</strong><span>${esc(a.answer||'')}</span></div>${feedback}</div>`;
+  }).join('');
+  let saved='';
+  if(Number(attempt.savedAt)){
+    try{saved=new Date(Number(attempt.savedAt)).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});}catch{}
+  }
+  const modeText=attempt.mode==='choice'?'4択':'自分で入力';
+  body.innerHTML=`<div class="previous-meta">${esc(modeText)}${saved?' · '+esc(saved):''}</div>${rows}`;
+}
+window.addEventListener('readinglab-progress-changed',()=>{refreshPassageOptions();renderPreviousAttempt();});
+'''
+                  if 'function render(){' not in s: raise SystemExit(f'render target not found in {name}')
+                  s=s.replace('function render(){',helper+'function render(){',1)
+
+              if "$('passageSelect').value=index;renderPreviousAttempt();" not in s:
+                  target="$('passageSelect').value=index;"
+                  if target not in s: raise SystemExit(f'render previous target not found in {name}')
+                  s=s.replace(target,target+'renderPreviousAttempt();',1)
+
+              # Rebuild the select with check marks from attemptedIds.
+              if "refreshPassageOptions();$('passageSelect').onchange" not in s:
+                  pattern=r"\$\('passageSelect'\)\.innerHTML=DATA\.map\(\(p,i\)=>.*?\.join\(''\);\$\('passageSelect'\)\.onchange"
+                  s,n=re.subn(pattern,"refreshPassageOptions();$('passageSelect').onchange",s,count=1,flags=re.S)
+                  if n!=1: raise SystemExit(f'passage select init target not found in {name}')
+
+              # Store the actual submitted answers and the returned feedback for the most recent attempt.
+              choice_old="window.readingLabCloud?.recordAttempt?.({passageId:p.id,total:p.questions.length,correct:count,mode:'choice'});"
+              choice_new="window.readingLabCloud?.recordAttempt?.({passageId:p.id,total:p.questions.length,correct:count,mode:'choice',lastAttempt:{savedAt:Date.now(),mode:'choice',answers:p.questions.map(q=>{const c=q.choices.find(c=>c.number===answers[q.number]);return {number:q.number,answer:c?.text||''};}),results:p.questions.map(q=>({number:q.number,verdict:answers[q.number]===q.answer_number?'correct':'incorrect',feedback:`解答：${q.answer_number}. ${q.answer_text}`,suggestion:q.answer_text}))}});"
+              if choice_old in s:
+                  s=s.replace(choice_old,choice_new,1)
+              elif "lastAttempt:{savedAt:Date.now(),mode:'choice'" not in s:
+                  raise SystemExit(f'choice attempt target not found in {name}')
+
+              free_old="window.readingLabCloud?.recordAttempt?.({passageId:p.id,total:p.questions.length,correct:goodCount,mode:'free'});"
+              free_new="window.readingLabCloud?.recordAttempt?.({passageId:p.id,total:p.questions.length,correct:goodCount,mode:'free',lastAttempt:{savedAt:Date.now(),mode:'free',answers:a.map(x=>({number:x.number,answer:x.answer})),results:result.results.map(r=>({number:r.number,verdict:r.verdict,feedback:r.feedback||'',suggestion:r.suggestion||''}))}});"
+              if free_old in s:
+                  s=s.replace(free_old,free_new,1)
+              elif "lastAttempt:{savedAt:Date.now(),mode:'free'" not in s:
+                  raise SystemExit(f'free attempt target not found in {name}')
+
+              # Extend the existing progress object with one latest answer per passage.
+              blank_old='return {attemptedIds:[],submissions:0,correctAnswers:0,totalAnswers:0,positiveCount:0,lastPlayedDate:""};'
+              blank_new='return {attemptedIds:[],submissions:0,correctAnswers:0,totalAnswers:0,positiveCount:0,lastPlayedDate:"",lastAnswers:{}};'
+              if blank_old in s:s=s.replace(blank_old,blank_new,1)
+
+              local_old='lastPlayedDate:typeof d.lastPlayedDate==="string"?d.lastPlayedDate:""\n    };'
+              local_new='lastPlayedDate:typeof d.lastPlayedDate==="string"?d.lastPlayedDate:"",\n      lastAnswers:d.lastAnswers&&typeof d.lastAnswers==="object"&&!Array.isArray(d.lastAnswers)?d.lastAnswers:{}\n    };'
+              if local_old in s:s=s.replace(local_old,local_new,1)
+              elif 'lastAnswers:d.lastAnswers' not in s: raise SystemExit(f'local progress target not found in {name}')
+
+              if 'const lastAnswers={...(a.lastAnswers||{})};' not in s:
+                  pattern=r'function mergeStats\(a,b\)\{.*?\n\}\nasync function saveFull'
+                  merged='''function mergeStats(a,b){
+  const lastAnswers={...(a.lastAnswers||{})};
+  for(const [id,v] of Object.entries(b.lastAnswers||{})){
+    if(!lastAnswers[id]||Number(v?.savedAt||0)>=Number(lastAnswers[id]?.savedAt||0))lastAnswers[id]=v;
+  }
+  return {
+    attemptedIds:[...new Set([...(a.attemptedIds||[]),...(b.attemptedIds||[])])],
+    submissions:Math.max(Number(a.submissions)||0,Number(b.submissions)||0),
+    correctAnswers:Math.max(Number(a.correctAnswers)||0,Number(b.correctAnswers)||0),
+    totalAnswers:Math.max(Number(a.totalAnswers)||0,Number(b.totalAnswers)||0),
+    positiveCount:Math.max(Number(a.positiveCount)||0,Number(b.positiveCount)||0),
+    lastPlayedDate:[a.lastPlayedDate||'',b.lastPlayedDate||''].sort().pop()||'',
+    lastAnswers
+  };
+}
+async function saveFull'''
+                  s,n=re.subn(pattern,merged,s,count=1,flags=re.S)
+                  if n!=1: raise SystemExit(f'mergeStats target not found in {name}')
+
+              save_old='lastPlayedDate:s.lastPlayedDate,\n    clientUpdatedAt:Date.now(),'
+              save_new='lastPlayedDate:s.lastPlayedDate,\n    lastAnswers:s.lastAnswers||{},\n    clientUpdatedAt:Date.now(),'
+              if save_old in s:s=s.replace(save_old,save_new,1)
+              elif 'lastAnswers:s.lastAnswers||{}' not in s: raise SystemExit(f'saveFull target not found in {name}')
+
+              sync_old='positiveCount:c.positiveCount,lastPlayedDate:c.lastPlayedDate\n    });'
+              sync_new='positiveCount:c.positiveCount,lastPlayedDate:c.lastPlayedDate,lastAnswers:c.lastAnswers||{}\n    });'
+              if sync_old in s:s=s.replace(sync_old,sync_new,1)
+              elif 'lastAnswers:c.lastAnswers||{}' not in s: raise SystemExit(f'cloud merge target not found in {name}')
+
+              record_old='const s=readLocal();\n    if(info?.passageId&&!s.attemptedIds.includes(info.passageId))s.attemptedIds.push(info.passageId);'
+              record_new='const s=readLocal();\n    if(info?.passageId&&info?.lastAttempt){s.lastAnswers=s.lastAnswers||{};s.lastAnswers[info.passageId]=info.lastAttempt;}\n    if(info?.passageId&&!s.attemptedIds.includes(info.passageId))s.attemptedIds.push(info.passageId);'
+              if record_old in s:s=s.replace(record_old,record_new,1)
+              elif 's.lastAnswers[info.passageId]=info.lastAttempt' not in s: raise SystemExit(f'recordAttempt target not found in {name}')
+
+              record_write='writeLocal(s);\n    try{await saveFull(s);}'
+              record_write_new="writeLocal(s);\n    window.dispatchEvent(new CustomEvent('readinglab-progress-changed'));\n    try{await saveFull(s);}"
+              if record_write in s:s=s.replace(record_write,record_write_new,1)
+              elif "readinglab-progress-changed'));\n    try{await saveFull(s);}" not in s: raise SystemExit(f'record progress event target not found in {name}')
+
+              sync_write='writeLocal(merged);\n  await saveFull(merged);'
+              sync_write_new="writeLocal(merged);\n  window.dispatchEvent(new CustomEvent('readinglab-progress-changed'));\n  await saveFull(merged);"
+              if sync_write in s:s=s.replace(sync_write,sync_write_new,1)
+              elif "writeLocal(merged);\n  window.dispatchEvent(new CustomEvent('readinglab-progress-changed'));" not in s: raise SystemExit(f'sync progress event target not found in {name}')
+
               p.write_text(s,encoding='utf-8')
           PY
       - name: Commit patch
@@ -36,5 +184,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add index.html public/index.html
-          git commit -m "Connect cloze practice to shared coin rewards"
+          git commit -m "Show completed cloze passages and latest answers"
           git push
