@@ -80,7 +80,7 @@
     if(!force&&passage.id===lastPanelPassage)return;
     lastPanelPassage=passage.id;
     const attempt=readJson(HISTORY_KEY)[passage.id];
-    if(!attempt||!Array.isArray(attempt.answers)||!attempt.answers.length){
+    if(!attempt||attempt.mode!=='free'||!Array.isArray(attempt.answers)||!attempt.answers.length){
       panel.classList.add('hidden');
       panel.open=false;
       body.innerHTML='';
@@ -91,7 +91,7 @@
     if(Number(attempt.savedAt)){
       try{when=new Date(Number(attempt.savedAt)).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});}catch{}
     }
-    const modeLabel=attempt.mode==='choice'?'4択':'自分で入力';
+    const modeLabel='自分で入力';
     const rows=attempt.answers.map(item=>{
       const feedback=item.feedback?`<div class="cloze-history-feedback">${escapeHtml(item.feedback)}</div>`:'';
       return `<div class="cloze-history-row"><div class="cloze-history-answer"><strong>空所 (${escapeHtml(item.number)})</strong><span>${escapeHtml(item.answer)}</span></div>${feedback}</div>`;
@@ -99,29 +99,19 @@
     body.innerHTML=`<div class="cloze-history-meta">${escapeHtml(modeLabel)}${when?' · '+escapeHtml(when):''}</div>${rows}`;
   }
 
-  function choiceText(button){
-    if(!button)return '';
-    return [...button.childNodes].filter(node=>node.nodeType===Node.TEXT_NODE).map(node=>node.textContent||'').join('').trim();
-  }
-
   function captureLatestAttempt(){
     const passage=currentPassage();
     if(!passage||!Array.isArray(passage.questions))return;
-    const isChoice=$('choice')?.classList.contains('active');
+    if(!$('free')?.classList.contains('active'))return;
     const answers=[];
     for(const q of passage.questions){
-      let answer='';
-      if(isChoice){
-        answer=choiceText(document.querySelector(`.choice.selected[data-q="${q.number}"]`));
-      }else{
-        answer=$('answer'+q.number)?.value?.trim()||'';
-      }
+      const answer=$('answer'+q.number)?.value?.trim()||'';
       if(!answer)return;
       const feedback=$('feedback'+q.number)?.innerText?.trim()||'';
       answers.push({number:q.number,answer,feedback});
     }
     const history=readJson(HISTORY_KEY);
-    history[passage.id]={savedAt:Date.now(),mode:isChoice?'choice':'free',answers};
+    history[passage.id]={savedAt:Date.now(),mode:'free',answers};
     localStorage.setItem(HISTORY_KEY,JSON.stringify(history));
     lastPanelPassage='';
     refreshChecks(true);
@@ -130,7 +120,8 @@
 
   function maybeCaptureFromResult(){
     const text=$('result')?.textContent?.trim()||'';
-    if(text==='判定が完了しました。'||/^\d+問中\d+問正解$/.test(text))captureLatestAttempt();
+    if(text==='判定が完了しました。')captureLatestAttempt();
+    else if(/^\d+問中\d+問正解$/.test(text))refreshChecks(true);
   }
 
   function boot(){
