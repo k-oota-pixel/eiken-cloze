@@ -1,56 +1,69 @@
-# もんすたでぃ セキュリティ改修
+# もんすたでぃ セキュリティ改修状況
 
-## 実装
+2026年10月23日（日本時間）
 
-- 4リポジトリのFirebase設定は eiken-retry / 231308672297 / 1:231308672297:web:5e8b8ede3a0246c2318b38 で一致。
-- AI POST全7経路でGoogleによるFirebase IDトークン検証を必須化。Originなしでも認証必須。CORSの許可は認証の代わりにしない。
-- 対象: TaskQuest、準2級面接採点、ペット会話、TalkQuest、空所補充、タイトル判定、読解要約。
-- 従来のGoogleログイン状態の復元を待ち、自動更新されるIDトークンを送信。未ログイン時はログイン案内を表示。4択などのローカル演習は従来どおり。
-- 管理APIは管理者メール一致に加えて、Googleが返す emailVerified を必須にする。
-- App CheckはreCAPTCHA Enterprise、自動更新。監視段階では取得失敗で認証済みAI利用を止めない。
-- Renderは APP_CHECK_MODE=monitor が既定。missing / invalid / unavailable / valid を記録。トークン・回答・UIDは監視ログに含めない。enforce では署名・有効期限・発行元・対象プロジェクト・App IDを検証して拒否する。
-- コイン計算・ショップ購入・学習記録・管理画面の既存の保存処理と保存先は維持。
+## 本番へ反映した内容
 
-## 確認済みの本番構成
+- english-playroom、task-quest、eiken-cloze、eiken-title の変更をマージ・公開。Renderの3サービスで最終コミットの live を確認。
+- AIの全7経路でFirebaseログインを必須化。GoogleによるIDトークンの検証を、入力処理・利用上限の消費・Gemini呼出しの前に実施。Originなしの直接アクセスも認証必須。
+- 既存のGoogleログイン状態を復元し、IDトークンを自動送信。ログイン済みの利用者に新しいログイン操作を求めない。未ログインのAI利用はログインが必要。
+- 管理者APIでは、管理者メールの一致に加え、Googleが返すメール確認済みフラグを確認。
+- reCAPTCHA EnterpriseのスコアベースWebキーを作成して、既存の eiken-retry-web にApp Checkを登録。許可ホストは k-oota-pixel.github.io とRenderの3ホスト。画像選択などのチャレンジは使用しない。
+- App Checkは監視段階。Firebaseの強制は有効にしていない。Renderの実応答で3サービスとも appCheckMode=monitor を確認。正常な証明は署名・発行元・有効期限・プロジェクト番号・App IDを検証する。
+- 同じAPIを使うTalkQuestにもApp Check送信を追加。既存ログイン、会話、履歴、報酬の処理を維持。
+- コイン、ショップ、学習記録、ペットの保存先・既存の正規処理を維持。データの一括更新・移行は行っていない。途中で追加されていたホームの文言変更も保持。
 
-Renderワークスペース task-quest、main 自動デプロイ、Singapore、Node。
+## 本番で確認したこと
 
-| サービス | ID | 起動 |
-|---|---|---|
-| task-quest | srv-db28mfh7lnhs73e1qdlg | node server.mjs |
-| eiken-cloze | srv-db48lnjbc2fs73b0n1mg | npm start |
-| eiken-title | srv-db496irl550s73b0loag | npm start |
+| 確認 | 結果 |
+|---|---|
+| Renderの3サービス | live、aiAuthRequired=true、appCheckMode=monitor |
+| 全7つのAI APIへ認証なしでPOST | 7件とも401 |
+| 同じ7経路へ偽トークンでPOST | 7件とも401 |
+| GitHub Pagesの対象3教材 | 認証ヘッダー送信コードと公開サイトキーを確認 |
+| CORS | Authorization / X-Firebase-AppCheck を許可、OPTIONSは204 |
+| 本体からタイトル教材へのログイン引継ぎ | 追加ログインなしで既存の本人の状態・進捗を表示 |
+| ペット会話 | Firebase認証・App Check成功、AIの返答まで確認 |
+| 学習ダッシュボード | 本人の保存済み12教材分の学習状況を表示 |
+| App Checkの実際の証明 | Renderログで pet-chat とタイトル採点の state=valid を確認 |
 
-環境変数の秘密値は取得していない。監視モード・プロジェクト指定の実環境変数、Firebase Authの許可ドメイン、App Checkのキー登録と指標は本番反映前に確認する。
+タイトル採点は、認証とApp Checkを通過した後、Geminiの応答待ちが2回タイムアウトした。401/403による拒否ではない。Geminiのモデル・キー・呼出し・待ち時間の既存コードは今回変更しておらず、タイトル採点の成功までは確認できていない。AI機能全体の本番受け入れが完了したとは扱わない。
 
-Firestoreの公開ルール実物は english-playroom/security/firestore.production.rules に記録。本人のサブツリーだけに読書きを許可。他人のデータへのアクセスを許す設定ではない。所有者によるコイン改ざんは残るため、監査結果を rules-audit.json に明記。正規のクライアント保存を壊す一律禁止は行っていない。
+## Security Rulesの実物確認
 
-## App Check登録と反映順
+Firebase Consoleで eiken-retry / (default) の公開ルールを確認。`users/{userId}/{document=**}` は、ログイン済みかつ本人UID一致のときだけ読書き可能。他人のサブツリーや未ログインのアクセスを許す設定ではなかった。公開ルールのスナップショットと監査結果は english-playroom/security/ に保存。
 
-1. Google Cloudの管理アカウントで利用規約を確認・同意し、eiken-retry にreCAPTCHA EnterpriseのスコアベースWebキーを作成。ドメイン検証を有効にし、k-oota-pixel.github.io と利用中のRender各ホストを登録。
-2. Firebase App Checkの eiken-retry-web にその公開サイトキーを登録。Firestore・Authenticationの強制はまだ有効にしない。
-3. 各リポジトリの app-check-config.js と public/app-check-config.js に同じ公開サイトキーを設定。秘密鍵・デバッグトークンはソースへ入れない。
-4. まずPagesのクライアント変更を公開し、全呼び出し元からAuthorizationが送られることを確認してから、Renderの認証必須化を反映。main 自動デプロイのためサーバーと画面の公開順に注意。開きっぱなしの旧画面は更新が必要になる。
-5. Renderは非秘密値 APP_CHECK_MODE=monitor、FIREBASE_PROJECT_ID=eiken-retry、FIREBASE_PROJECT_NUMBER=231308672297、FIREBASE_APP_IDS=上記App ID で確認。既存のGEMINIキー・管理者・サービスアカウントなどを置き換えない。
-6. Googleログイン済みで教材→AI採点→学習記録→正規コイン付与→重複付与拒否を確認。ショップの正規購入・ペット・管理者一覧/詳細/コイン付与も専用テストアカウントで確認。生徒の本番データをテスト用に変更しない。
-7. 未ログイン・偽トークン・他プロジェクトのトークン・非管理者の管理APIが拒否されることを確認。各AI経路がGeminiを呼ぶ前に拒否することを確認。
-8. Firebase指標とRender app_checkログを通常利用期間で観察し、正常な学校端末・モバイル・各教材で valid が安定することを確認。TalkQuestなど4リポジトリ外の呼び出し元もApp Checkトークンを送る必要がある。
-9. 上記確認後にのみ、Renderの APP_CHECK_MODE=enforce とFirebase各サービスの強制を段階的に有効化。Firestore強制は同じプロジェクトを使う他教材にも影響するため、4リポジトリだけの確認では実施しない。
+現行ルールは変更していない。クライアントからの正規のコイン付与・購入・ペット・学習保存を維持するため、本人の書込みを一律に禁止していない。
 
-## 戻し方
+残る制約として、本人は自分のコインや購入済みアイテムを直接改変できる余地があり、フィールドの型・サイズ検証も限定的。App Checkではこの種の改ざんは防げない。対処には、報酬・支出の信頼できるサーバー側トランザクションへの移管と、全呼び出し元の移行後のフィールド制限が必要。
 
-App Check強制で正常通信に問題が出た場合は Renderを monitor に戻し、Firebaseで新たに有効化したApp Check強制を解除する。Firebaseログイン必須は維持する。画面の問題は該当フロントエンドのコミットを戻す。データ移行や既存レコードの書換えは含まない。
+## テスト
 
-## 検証と残作業
+- english-playroom: 既存82件＋追加4件が成功。GitHubのセキュリティチェック・猫の描画テストも成功。
+- 新しい検証器8件、クライアント4件、各サーバーのHTTP結合テスト、既存の読解要約2件が成功。
+- TaskQuestの管理・学習・ショップ・会話等の既存22件が成功。
+- モックFirebaseを使ったブラウザーテストで、管理画面、ペット保存・会話、読解コインの二重付与防止、ログアウト、スマホ表示を確認。
+- TalkQuestの既存2件、会話・認証ヘッダー・履歴・再試行・コイン・終了/再開・入力操作のブラウザーテストとGitHubチェックが成功。
+- 既存の daily-coins.test.mjs は ranked.coinsToday が undefined となる1件の失敗がある。該当実装・テストは今回未変更。成功したチェックだけで全既存テスト成功とはしていない。
 
-english-playroomの既存82件と追加クライアント4件が成功。新しい検証器8件、3サーバーの全AI経路のHTTP結合テスト、既存読解要約2件が成功。TaskQuestの管理・学習・ショップ・会話等の既存テスト22件が成功。
+## 今後App Checkを強制する条件と戻し方
 
-既存 daily-coins.test.mjs は ranked.coinsToday が undefined となり1件失敗。daily-coins.mjs とそのテストは取得時のHEADから未変更であり、今回の改修による失敗ではない。ランキングを含む実アカウントでの受け入れ確認は未完了。
+1. 学校の通常端末・モバイル・各教材で、正規リクエストの valid が安定することを監視。
+2. タイトル採点のGemini待ちタイムアウトを切り分け、AI機能の正常終了を確認。
+3. Renderを強制する場合は、全AI呼び出し元からApp Checkトークンが送られていることを確認して APP_CHECK_MODE=enforce に変更し、該当デプロイ後に確認。認証必須化は維持する。
+4. Firestoreを強制する場合は、対象4リポジトリだけでなく、同じFirebaseプロジェクトを使う全教材を確認してからFirebase Consoleで段階的に適用する。
+5. 強制後に正常通信が失敗した場合は、Renderをmonitorへ戻し、Firebaseで新たに適用したApp Check強制を解除。Firebaseログイン必須は解除しない。
 
-App Checkサイトキーの作成・登録、本番反映、実アカウントでの受け入れ確認、App Check指標の観察は未完了。テスト成功を本番動作確認済みとは扱わない。
+現段階では強制していないため、上記の解除操作は不要。
 
-公式参照:
-- https://firebase.google.com/docs/app-check/web/recaptcha-enterprise-provider
-- https://firebase.google.com/docs/app-check/custom-resource-backend
-- https://firebase.google.com/docs/auth/admin/verify-id-tokens
-- https://docs.cloud.google.com/identity-platform/docs/reference/rest/v1/accounts/lookup
+## 反映したPR
+
+- [english-playroom #33](https://github.com/k-oota-pixel/english-playroom/pull/33)
+- [task-quest #10](https://github.com/k-oota-pixel/task-quest/pull/10)
+- [eiken-cloze #1](https://github.com/k-oota-pixel/eiken-cloze/pull/1)
+- [eiken-title #1](https://github.com/k-oota-pixel/eiken-title/pull/1)
+- [talk-quest #4](https://github.com/k-oota-pixel/talk-quest/pull/4)
+
+Firebase構成: eiken-retry / 231308672297 / 1:231308672297:web:5e8b8ede3a0246c2318b38。
+秘密キー、サービスアカウント、既存の管理者メールを置き換える操作は行っていない。
+
