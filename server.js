@@ -1,6 +1,8 @@
+import {createSecurityGate} from './security-gate.mjs';
 import http from 'node:http';
 import {readFileSync} from 'node:fs';
 
+const {verifyUser,checkApp}=createSecurityGate();
 const data=JSON.parse(readFileSync(new URL('./data.json',import.meta.url),'utf8')).passages;
 const html=readFileSync(new URL('./public/index.html',import.meta.url));
 const key=process.env.GEMINI_API_KEY;
@@ -151,7 +153,7 @@ function applyCors(req,res){
     res.setHeader('Access-Control-Allow-Origin',GITHUB_ORIGIN);
     res.setHeader('Vary','Origin');
     res.setHeader('Access-Control-Allow-Methods','GET,POST,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers','Content-Type');
+    res.setHeader('Access-Control-Allow-Headers','Content-Type, Authorization, X-Firebase-AppCheck');
     res.setHeader('Access-Control-Max-Age','86400');
   }
 }
@@ -164,6 +166,13 @@ export const server=http.createServer(async(req,res)=>{
   }
   if(!originAllowed(req))return send(res,403,{error:'このサイトからは利用できません。'});
   const path=new URL(req.url,'http://localhost').pathname;
+  if(req.method==='POST'&&["/api/grade"].includes(path)){
+    try{await verifyUser(req);await checkApp(req);}catch(e){return send(res,e.status||503,{error:e.message});}
+  }
+  if(req.method==='GET'&&['/firebase-security.js','/app-check-config.js'].includes(path)){
+    res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8','Cache-Control':'no-cache'});
+    return res.end(readFileSync(new URL('.'+path,import.meta.url)));
+  }
   if(req.method==='GET'&&(path==='/'||path==='/index.html')){
     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','X-Content-Type-Options':'nosniff'});
     return res.end(html);
