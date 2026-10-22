@@ -166,6 +166,9 @@ export const server=http.createServer(async(req,res)=>{
   }
   if(!originAllowed(req))return send(res,403,{error:'このサイトからは利用できません。'});
   const path=new URL(req.url,'http://localhost').pathname;
+  if(req.method==='POST'&&["/api/grade"].includes(path)){
+    try{await verifyUser(req);await checkApp(req);}catch(e){return send(res,e.status||503,{error:e.message});}
+  }
   if(req.method==='GET'&&['/firebase-security.js','/app-check-config.js'].includes(path)){
     res.writeHead(200,{'Content-Type':'text/javascript; charset=utf-8','Cache-Control':'no-cache'});
     return res.end(readFileSync(new URL('.'+path,import.meta.url)));
@@ -174,7 +177,7 @@ export const server=http.createServer(async(req,res)=>{
     res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','X-Content-Type-Options':'nosniff'});
     return res.end(html);
   }
-  if(req.method==='GET'&&path==='/health')return send(res,200,{securityVersion:'2026-10-22',aiAuthRequired:false,appCheckMode:process.env.APP_CHECK_MODE||'monitor',ok:true});
+  if(req.method==='GET'&&path==='/health')return send(res,200,{securityVersion:'2026-10-22',aiAuthRequired:true,appCheckMode:process.env.APP_CHECK_MODE||'monitor',ok:true});
   if(req.method!=='POST'||path!=='/api/grade')return send(res,404,{error:'ページが見つかりません。'});
 
   const ip=(req.headers['x-forwarded-for']||req.socket.remoteAddress||'').toString().split(',').pop().trim();
