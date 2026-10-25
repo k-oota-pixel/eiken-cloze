@@ -1,5 +1,5 @@
 import {getApp,getApps,initializeApp} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js';
-import {getAuth} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';
+import {getAuth} from 'https://k-oota-pixel.github.io/english-playroom/auth-session.js?v=2.1.2';
 import {initializeAppCheck,ReCaptchaEnterpriseProvider,getToken} from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-app-check.js';
 import {APP_CHECK_SITE_KEY} from './app-check-config.js';
 

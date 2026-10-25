@@ -13,7 +13,8 @@ const root=path.resolve(__dirname,'..'),key='readinglab-eiken-cloze-last-answers
   await page.route('http://127.0.0.1:8765/**',route=>{const file=path.join(root,new URL(route.request().url()).pathname==='/'?'index.html':new URL(route.request().url()).pathname);return route.fulfill({contentType:file.endsWith('.js')?'text/javascript':'text/html',body:fs.readFileSync(file)});});
   let failGrade=false;
   await page.route('https://eiken-cloze.onrender.com/api/grade',route=>route.fulfill({status:failGrade?503:200,contentType:'application/json',body:JSON.stringify(failGrade?{error:'判定できませんでした。'}:{results:route.request().postDataJSON().answers.map(a=>({number:a.number,verdict:'acceptable',feedback:'手入力のフィードバック',suggestion:'表現例'}))})}));
-  await page.goto('http://127.0.0.1:8765');await page.waitForFunction(()=>window.readingLabCloud);
+  await page.route('**/auth-session.js*',r=>r.fulfill({contentType:'text/javascript',body:"export * from 'https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js';"}));
+await page.goto('http://127.0.0.1:8765');await page.waitForFunction(()=>window.readingLabCloud);
   const passage=await page.evaluate(()=>DATA[0]);
   async function typeAndGrade(prefix){await page.locator('#free').click();for(const q of passage.questions)await page.locator('#answer'+q.number).fill(prefix+q.number);await page.locator('#check').click();await page.waitForFunction(()=>document.querySelector('#result').textContent==='判定が完了しました。');await page.waitForTimeout(50);}
   async function solveChoices(){await page.locator('#choice').click();for(const q of passage.questions)await page.locator(`.choice[data-q="${q.number}"][data-c="${q.answer_number}"]`).click();await page.locator('#check').click();await page.waitForTimeout(80);}

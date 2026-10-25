@@ -32,7 +32,7 @@ async function askServer(p,payload){
     : {passage_id:p.id,answers:payload.answers.map(a=>({number:a.number,answer:a.answer}))};
   const response=await fetch('https://eiken-cloze.onrender.com/api/grade',{
     method:'POST',
-    headers:await (await import('./firebase-security.js')).apiHeaders(),
+    headers:await (await import('./firebase-security.js?v=2.1.2')).apiHeaders(),
     body:JSON.stringify(body),
     signal:AbortSignal.timeout(60000)
   });
@@ -46,12 +46,12 @@ busy=true;document.querySelectorAll('#check,#passageSelect,#previous,#next,#free
 $('passageSelect').innerHTML=DATA.map((p,i)=>`<option value="${i}">${String(i+1).padStart(2,'0')} · ${p.year}年度 第${p.session}回</option>`).join('');$('passageSelect').onchange=e=>{index=Number(e.target.value);render()};$('previous').onclick=()=>{if(index>0){index--;render()}};$('next').onclick=()=>{if(index<DATA.length-1){index++;render()}};$('free').onclick=()=>setMode('free');$('choice').onclick=()=>setMode('choice');$('reveal').onclick=()=>{$('original').textContent='元のタイトル：'+DATA[index].title};$('connection').textContent='AI判定対応';if(IS_TITLE)$('modes').classList.add('hidden');render();
 </script>
 <script type="module">
-import {enableAppCheck} from './firebase-security.js';
+import {enableAppCheck} from './firebase-security.js?v=2.1.2';
 import { initializeApp } from "https://www.gstatic.com/firebasejs/13.0.0/firebase-app.js";
 import {
   getAuth, GoogleAuthProvider, signInWithPopup, signOut,
   onAuthStateChanged, setPersistence, browserLocalPersistence
-} from "https://www.gstatic.com/firebasejs/13.0.0/firebase-auth.js";
+} from "https://k-oota-pixel.github.io/english-playroom/auth-session.js?v=2.1.2";
 import {
   getFirestore, doc, getDoc, setDoc, serverTimestamp
 } from "https://www.gstatic.com/firebasejs/13.0.0/firebase-firestore.js";
@@ -192,6 +192,6 @@ onAuthStateChanged(auth,async user=>{
   finally{loginBtn.disabled=false;}
 });
 </script>
-<script type="module" src="https://k-oota-pixel.github.io/english-playroom/coin-reward.js?v=1.10.4"></script>
+<script type="module" src="https://k-oota-pixel.github.io/english-playroom/coin-reward.js?v=2.1.2"></script>
 </body></html>
 <script>globalThis.MonstudyMaterial?.setActivityGuard(()=>Boolean([...document.querySelectorAll("textarea,input[type=text]")].some(e=>e.value.trim()) || document.querySelector(".choice.selected")));</script>
