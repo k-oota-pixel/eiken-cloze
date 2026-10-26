@@ -146,16 +146,23 @@ async function syncOnLogin(user){
   const local=readLocal();
   const snap=await getDoc(cloudRef(user));
   let merged=local;
+  let cloud={};
   if(snap.exists()){
     const c=snap.data()||{};
-    merged=mergeStats(local,{
+    cloud={
       attemptedIds:Array.isArray(c.attemptedIds)?c.attemptedIds:[],
       submissions:c.submissions,correctAnswers:c.correctAnswers,totalAnswers:c.totalAnswers,
       positiveCount:c.positiveCount,lastPlayedDate:c.lastPlayedDate
+    };
+    merged=mergeStats(local,{
+      ...cloud
     });
   }
   writeLocal(merged);
-  await saveFull(merged);
+  const cloudIds=[...new Set(cloud.attemptedIds||[])].sort(),mergedIds=[...new Set(merged.attemptedIds||[])].sort();
+  const needsUpload=!snap.exists()||JSON.stringify(cloudIds)!==JSON.stringify(mergedIds)||merged.submissions!==(Number(cloud.submissions)||0)||merged.correctAnswers!==(Number(cloud.correctAnswers)||0)||merged.totalAnswers!==(Number(cloud.totalAnswers)||0)||merged.positiveCount!==(Number(cloud.positiveCount)||0)||merged.lastPlayedDate!==(typeof cloud.lastPlayedDate==="string"?cloud.lastPlayedDate:"");
+  if(needsUpload&&(merged.attemptedIds.length||merged.submissions||merged.totalAnswers||merged.lastPlayedDate))await saveFull(merged);
+  else setUI("ok",shortName(user),`☁ ${merged.attemptedIds.length} / 17`);
 }
 window.readingLabCloud={
   async recordAttempt(info){
