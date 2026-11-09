@@ -35,13 +35,20 @@ function restoreWritingDrafts(){
     const field=$('answer'+q.number);if(!field)return;
     const key=writingDraftKey(q.number);
     if(key&&!field.value)try{field.value=localStorage.getItem(key)||'';}catch{}
+    if(field.dataset.clozeDraftBound==='1')continue;
+    field.dataset.clozeDraftBound='1';
     field.addEventListener('input',()=>{
       const currentKey=writingDraftKey(q.number);
       if(currentKey)try{localStorage.setItem(currentKey,field.value);}catch{}
     });
   }
 }
-window.addEventListener('load',restoreWritingDrafts);
+window.addEventListener('load',()=>{
+  restoreWritingDrafts();
+  // Auth may resolve after the first render; restore only once the learner is identified.
+  void import('https://k-oota-pixel.github.io/english-playroom/coin-reward.js?v=2.4.50')
+    .then(async module=>{await module.authReady;restoreWritingDrafts();}).catch(()=>{});
+});
 function setMode(m){mode=m;$('free').classList.toggle('active',m==='free');$('choice').classList.toggle('active',m==='choice');render()}
 function showFeedback(id,item){const ratings={correct:'正解',acceptable:'文脈に合っています',almost:'あと少し',incorrect:'もう一度考えよう',excellent:'内容をよく捉えています',good:'よく捉えています',partial:'もう少し全体を捉えよう',off_topic:'本文の中心に戻って考えよう'};const good=['correct','acceptable','excellent','good'].includes(item.verdict),warn=['almost','partial'].includes(item.verdict);$(id).innerHTML=`<div class="feedback ${good?'good':warn?'warn':'bad'}"><strong>${esc(ratings[item.verdict]||'フィードバック')}</strong><p>${esc(item.feedback||'')}</p>${item.suggestion?'<p>表現例：'+esc(item.suggestion)+'</p>':''}</div>`;}
 let titleOwner='';function titleEvent(e){e.expectedUid=titleOwner;window.EnglishPlayroomCoins?.recordTitleEvent?.(IS_TITLE?'eiken-title':'eiken-cloze',e);}
