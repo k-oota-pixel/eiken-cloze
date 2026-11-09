@@ -58,48 +58,63 @@ const buckets=new Map();
 let active=0;
 setInterval(()=>{for(const [k,v]of buckets)if(Date.now()-v.time>60000)buckets.delete(k)},60000).unref();
 
-async function callGemini(payload){
-  const url=`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
-  const body=JSON.stringify({
-    systemInstruction:{parts:[{text:clozePrompt}]},
-    contents:[{role:'user',parts:[{text:JSON.stringify(payload)}]}],
-    generationConfig:{
-      temperature:0.1,
-      maxOutputTokens:1536,
-      thinkingConfig:{thinkingLevel:'low'},
-      responseMimeType:'application/json',
-      responseSchema
-    }
-  });
+const fallbackModel=process.env.EIKEN_GEMINI_FALLBACK_MODEL||'gemini-3.6-flash';
 
-  for(let attempt=0;attempt<2;attempt++){
+async function callGemini(payload){
+  const models=fallbackModel&&fallbackModel!==model?[model,model,fallbackModel]:[model,model];
+  let lastError=null;
+  for(let attempt=0;attempt<models.length;attempt++){
+    const current=models[attempt];
+    if(attempt)await sleep(attempt===1?500:1000);
     try{
-      const response=await fetch(url,{
+      const generationConfig={
+        maxOutputTokens:2048,
+        thinkingConfig:current.startsWith('gemini-2.5-')?{thinkingBudget:0}:{thinkingLevel:'low'},
+        responseMimeType:'application/json',
+        responseSchema
+      };
+      if(!/^gemini-[3-9](?:[.-]|$)/.test(current))generationConfig.temperature=0.1;
+      const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(current)}:generateContent`,{
         method:'POST',
         headers:{'Content-Type':'application/json','x-goog-api-key':key},
-        signal:AbortSignal.timeout(18000),
-        body
+        signal:AbortSignal.timeout(14000),
+        body:JSON.stringify({
+          systemInstruction:{parts:[{text:clozePrompt}]},
+          contents:[{role:'user',parts:[{text:JSON.stringify(payload)}]}],
+          generationConfig
+        })
       });
-      if(response.ok)return await response.json();
-
-      let detail={};
-      try{detail=await response.json();}catch{}
+      if(response.ok){
+        const result=await response.json();
+        if(result.candidates?.[0]?.finishReason==='STOP')return result;
+        console.warn(`Gemini ${current}: incomplete generation`);
+        lastError=Object.assign(new Error('AIの判定結果が途中で終了しました。入力を残したまま再試行できます。'),{status:503});
+        continue;
+      }
+      let detail={};try{detail=await response.json();}catch{}
       const reason=(detail.error?.details||[]).find(item=>typeof item.reason==='string')?.reason;
       const code=String(reason||detail.error?.status||'UNKNOWN').replace(/[^A-Z0-9_]/g,'').slice(0,80);
-      console.error(`Gemini ${model} HTTP ${response.status}: ${code}`);
-      if([500,502,503,504].includes(response.status)&&attempt===0){await sleep(350);continue;}
+      console.error(`Gemini ${current} HTTP ${response.status}: ${code}`);
       if(response.status===429)throw Object.assign(new Error('Geminiの利用が一時的に集中しています。少し待って、もう一度お試しください。'),{status:503});
-      if(response.status===404)throw Object.assign(new Error('AIモデルに接続できませんでした。先生がモデル設定を確認してください。'),{status:502});
-      if(response.status>=500)throw Object.assign(new Error('Gemini側で一時的なエラーが発生しました。もう一度お試しください。'),{status:503});
+      if(response.status===404){
+        lastError=Object.assign(new Error('AIモデルに接続できませんでした。管理者がモデル設定を確認してください。'),{status:502});
+        continue;
+      }
+      if(response.status>=500){
+        lastError=Object.assign(new Error('Gemini側で一時的なエラーが発生しました。入力を残したまま再試行できます。'),{status:503});
+        continue;
+      }
       throw Object.assign(new Error(`Geminiエラー ${response.status} / ${code}`),{status:502});
-    }catch(e){
-      const timedOut=e?.name==='TimeoutError'||e?.name==='AbortError'||/timed out/i.test(String(e?.message||''));
-      if(timedOut&&attempt===0){await sleep(300);continue;}
-      if(timedOut)throw Object.assign(new Error('Geminiからの応答が遅いため、判定をやり直してください。'),{status:504});
-      throw e;
+    }catch(error){
+      if(error?.name==='TimeoutError'||error?.name==='AbortError'||error instanceof TypeError){
+        lastError=Object.assign(new Error('AIからの応答に時間がかかっています。入力を残したまま再試行できます。'),{status:504});
+        console.warn(`Gemini ${current}: timeout or network error`);
+        continue;
+      }
+      throw error;
     }
   }
-  throw Object.assign(new Error('Geminiから応答を受け取れませんでした。もう一度お試しください。'),{status:503});
+  throw lastError||Object.assign(new Error('AIから応答を受け取れませんでした。再試行してください。'),{status:503});
 }
 
 function normalizeResult(item){
